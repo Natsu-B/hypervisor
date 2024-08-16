@@ -1,0 +1,9 @@
+[build]
+target = "aarch64-unknown-none"
+rustflags = ["-C", "link-arg=-Thypervisor.ld", "-C", "target-feature=-neon,-sve", "-C", "soft-float=yes"]
+
+[unstable]
+build-std = ["core", "compiler_builtins"]
+
+[target.aarch64-unknown-none]
+runner="./run.sh"
