@@ -30,6 +30,7 @@ use exception::setup_exception;
 use print::set_color;
 use uefi::serial_port::SerialPortInfo;
 use uefi::EfiConfigurationTable;
+use system_info::SystemInformation;
 
 use crate::cpu::*;
 use crate::paging::PAGE_SHIFT;
@@ -53,13 +54,10 @@ mod uefi;
 mod mmio {
     pub mod pl011;
 }
-mod serial_port;
+mod system_info;
 
 static mut IMAGE_HANDLE: EfiHandle = 0;
 static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
-static mut ACPI_20_TABLE_ADDRESS: Option<NonZeroUsize> = None;
-static mut DTB_ADDRESS: Option<NonZeroUsize> = None;
-
 /// The memory size to allocate
 pub const ALLOC_SIZE: usize = 256 * 1024 * 1024; /* 256 MB */
 pub const MAX_PHYSICAL_ADDRESS: usize = (1 << (48 + 1)) - 1;
@@ -77,32 +75,19 @@ extern "C" fn main(
     image_handle: EfiHandle,
     system_table: *mut EfiSystemTable,
     original_page_table: usize,
+    system_info: SystemInformation,
 ) -> ! {
     let system_table = unsafe { &*system_table };
-    detect_acpi_and_dtb(system_table);
-
     unsafe {
         IMAGE_HANDLE = image_handle;
         SYSTEM_TABLE = system_table;
         console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol);
     }
 
-    //assert_eq!(get_current_el() >> 2, 2, "Expected CurrentEL is EL2");
-    if get_current_el() >> 2 != 2 {
-        println!("Expected CurrentEL is EL2");
-        exit_bootloader();
-    }
-
-    if let Some(SerialPortInfo {
-        physical_address,
-        virtual_address: _,
-        port_type: _,
-    }) =
-        serial_port::detect_serial_port(unsafe { ACPI_20_TABLE_ADDRESS }, unsafe { DTB_ADDRESS })
+    if let Some(serial_port) = system_info.serial_port
     {
-        println!("Serial port detected at: {:#X}", physical_address);
-        paging::setup_stage_2_translation(physical_address, RANGE)
-            .expect("Failed to setup Stage2 Paging"); //ここ変える
+        paging::setup_stage_2_translation(serial_port, RANGE)
+            .expect("Failed to setup Stage2 Paging");
     } else {
         println!("Error: Cannot detect serial port");
         paging::setup_stage_2_translation(PL011, RANGE);
@@ -122,29 +107,6 @@ extern "C" fn main(
     /* Jump to EL1(el1_main) */
     el2_to_el1(el1_main as *const fn() as usize, stack_address);
     panic!("Failed to jump EL1");
-}
-
-/// Analyze EfiSystemTable and store [`ACPI_20_TABLE_ADDRESS`] and [`DTB_ADDRESS`]
-///
-/// # Arguments
-/// * system_table: Efi System Table
-/// * b_s: EfiBootService
-fn detect_acpi_and_dtb(system_table: &EfiSystemTable) {
-    for i in 0..system_table.num_table_entries {
-        let table = unsafe {
-            &*((system_table.configuration_table
-                + i * core::mem::size_of::<EfiConfigurationTable>())
-                as *const EfiConfigurationTable)
-        };
-        pr_debug!("GUID: {:#X?}", table.vendor_guid);
-        if table.vendor_guid == EFI_DTB_TABLE_GUID {
-            pr_debug!("Detect DTB");
-            unsafe { DTB_ADDRESS = NonZeroUsize::new(table.vendor_table) };
-        } else if table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
-            pr_debug!("Detect ACPI 2.0");
-            unsafe { ACPI_20_TABLE_ADDRESS = NonZeroUsize::new(table.vendor_table) };
-        }
-    }
 }
 
 /// Allocate memory

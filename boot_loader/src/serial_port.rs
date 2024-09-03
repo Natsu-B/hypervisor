@@ -6,9 +6,9 @@
 // http://opensource.org/licenses/mit-license.php
 
 use core::num::NonZeroUsize;
-use crate::uefi::{serial_port::{SerialPortInfo,SerialPortType}, acpi_table::*};
+use crate::uefi::acpi_table::*;
 
-fn try_to_get_serial_info_from_acpi(rsdp_address: usize) -> Option<SerialPortInfo> {
+fn try_to_get_serial_info_from_acpi(rsdp_address: usize) -> Option<usize> {
     let spcr = get_acpi_table(rsdp_address, b"SPCR");
     if let Err(e) = spcr {
         println!("SPCR is not found: {:?}", e);
@@ -24,22 +24,15 @@ fn try_to_get_serial_info_from_acpi(rsdp_address: usize) -> Option<SerialPortInf
         return None;
     }
 
-    let port_type = match serial_port_type {
-        0x03 => SerialPortType::ArmPl011,
-        _ => {
-            println!("Unsupported Serial Port");
-            return None;
-        }
-    };
+    if serial_port_type != 0x03 {
+        println!("Unsupported Serial Port");
+        return None;
+    }
 
-    return Some(SerialPortInfo {
-        physical_address: address.get_address() as usize,
-        virtual_address: address.get_address() as usize,
-        port_type,
-    });
+    return Some(address.get_address() as usize);
 }
 
-fn try_to_get_serial_info_from_dtb(dtb_address: usize) -> Option<SerialPortInfo> {
+fn try_to_get_serial_info_from_dtb(dtb_address: usize) -> Option<usize> {
     let dtb_analyser = crate::uefi::dtb::DtbAnalyser::new(dtb_address);
     if let Err(_) = dtb_analyser {
         println!("Invalid DTB");
@@ -62,14 +55,10 @@ fn try_to_get_serial_info_from_dtb(dtb_address: usize) -> Option<SerialPortInfo>
                 }
 
                 let address = node.get_offset();
-                return Some(SerialPortInfo {
-                    physical_address: address,
-                    virtual_address: address,
-                    port_type: match index {
-                        0 => SerialPortType::ArmPl011,
-                        _ => unreachable!(),
-                    },
-                });
+                if index != 0 {
+                    panic!();
+                }
+                return Some(address);
             }
             Ok(None) => break,
             Err(_) => {
@@ -85,7 +74,7 @@ fn try_to_get_serial_info_from_dtb(dtb_address: usize) -> Option<SerialPortInfo>
 pub fn detect_serial_port(
     acpi_table: Option<NonZeroUsize>,
     dtb_address: Option<NonZeroUsize>,
-) -> Option<SerialPortInfo> {
+) -> Option<usize> {
     if let Some(acpi_table) = acpi_table {
         let result = try_to_get_serial_info_from_acpi(acpi_table.get());
 

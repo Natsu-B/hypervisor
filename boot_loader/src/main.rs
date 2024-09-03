@@ -14,12 +14,21 @@ mod console;
 mod cpu;
 mod elf;
 mod paging;
-
-use cpu::*;
-use paging::{PAGE_MASK, PAGE_SHIFT};
-use uefi::{boot_service::EfiBootServices, file, EfiHandle, EfiStatus, EfiSystemTable};
+mod serial_port;
+mod system_info;
 
 use core::mem::MaybeUninit;
+use core::num::NonZeroUsize;
+use cpu::*;
+use paging::{PAGE_MASK, PAGE_SHIFT};
+use serial_port::detect_serial_port;
+use system_info::SystemInformation;
+use uefi::{boot_service::EfiBootServices, file, EfiConfigurationTable, EfiHandle, EfiStatus, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+
+static mut IMAGE_HANDLE: EfiHandle = 0;
+static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
+static mut ACPI_20_TABLE_ADDRESS: Option<NonZeroUsize> = None;
+static mut DTB_ADDRESS: Option<NonZeroUsize> = None;
 
 static mut ORIGINAL_PAGE_TABLE: usize = 0;
 
@@ -37,20 +46,66 @@ extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTabl
     unsafe { console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol) };
     let b_s = unsafe { &*((*system_table).efi_boot_services) };
     unsafe { BOOT_SERVICES = b_s };
+    let system_table_ref = unsafe { &*system_table };
+    unsafe {
+        IMAGE_HANDLE = image_handle;
+        SYSTEM_TABLE = system_table;
+        console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol);
+    }
 
+    detect_acpi_and_dtb(system_table_ref);
+
+    if get_current_el() >> 2 != 2 {
+        println!("Expected CurrentEL is EL2");
+        exit_bootloader();
+    }
     let entry_point = load_hypervisor(image_handle, b_s);
 
     println!("Call the hypervisor(Entry Point: {:#X})", entry_point);
 
+    let serial_port_address =
+        serial_port::detect_serial_port(unsafe { ACPI_20_TABLE_ADDRESS }, unsafe { DTB_ADDRESS });
+
     dsb();
     isb();
+
+    let system_info = SystemInformation {
+        spin_table_info: None,
+        serial_port: serial_port_address,
+    };
+
+    //Maybe I should add dsb() and isb()
     unsafe {
-        (core::mem::transmute::<usize, extern "C" fn(EfiHandle, *mut EfiSystemTable, usize)>(
-            entry_point,
-        ))(image_handle, system_table, ORIGINAL_PAGE_TABLE)
+        (core::mem::transmute::<
+            usize,
+            extern "C" fn(EfiHandle, *mut EfiSystemTable, usize, SystemInformation),
+        >(entry_point))(image_handle, system_table, ORIGINAL_PAGE_TABLE, system_info)
     };
 
     unreachable!();
+}
+
+/// Analyze EfiSystemTable and store [`ACPI_20_TABLE_ADDRESS`] and [`DTB_ADDRESS`]
+///
+/// # Arguments
+/// * system_table: Efi System Table
+/// * b_s: EfiBootService
+fn detect_acpi_and_dtb(system_table: &EfiSystemTable) {
+    for i in 0..system_table.num_table_entries {
+        let table = unsafe {
+            &*((system_table.configuration_table
+                + i * core::mem::size_of::<EfiConfigurationTable>())
+                as *const EfiConfigurationTable)
+        };
+        pr_debug!("GUID: {:#X?}", table.vendor_guid);
+        if table.vendor_guid == EFI_DTB_TABLE_GUID {
+            pr_debug!("Detect DTB");
+            unsafe { DTB_ADDRESS = NonZeroUsize::new(table.vendor_table) };
+        } else if table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
+            pr_debug!("Detect ACPI 2.0");
+            unsafe { ACPI_20_TABLE_ADDRESS = NonZeroUsize::new(table.vendor_table) };
+        }
+    }
 }
 
 /// Load hypervisor_kernel to [`common::HYPERVISOR_VIRTUAL_BASE_ADDRESS`]
@@ -188,6 +243,18 @@ fn load_hypervisor(image_handle: EfiHandle, b_s: &EfiBootServices) -> usize {
 
 fn allocate_memory(pages: usize) -> Result<usize, EfiStatus> {
     unsafe { &*BOOT_SERVICES }.alloc_highest_memory(pages, usize::MAX)
+}
+
+fn exit_bootloader() -> ! {
+    unsafe {
+        ((*(*SYSTEM_TABLE).efi_boot_services).exit)(
+            IMAGE_HANDLE,
+            uefi::EfiStatus::EfiSuccess,
+            0,
+            core::ptr::null(),
+        );
+    }
+    panic!("Failed to exit");
 }
 
 #[panic_handler]
