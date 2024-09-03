@@ -6,7 +6,8 @@
 // http://opensource.org/licenses/mit-license.php
 
 use core::num::NonZeroUsize;
-use crate::uefi::acpi_table::*;
+use common::uefi::acpi_table::*;
+use common::println;
 
 fn try_to_get_serial_info_from_acpi(rsdp_address: usize) -> Option<usize> {
     let spcr = get_acpi_table(rsdp_address, b"SPCR");

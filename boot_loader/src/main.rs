@@ -8,22 +8,18 @@
 #![no_std]
 #![no_main]
 
-mod uefi;
-#[macro_use]
-mod console;
-mod cpu;
 mod elf;
 mod paging;
 mod serial_port;
-mod system_info;
 
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
-use cpu::*;
-use paging::{PAGE_MASK, PAGE_SHIFT};
+use common::cpu::*;
+use common::cpu::{PAGE_MASK, PAGE_SHIFT};
 use serial_port::detect_serial_port;
-use system_info::SystemInformation;
-use uefi::{boot_service::EfiBootServices, file, EfiConfigurationTable, EfiHandle, EfiStatus, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+use common::{uefi, SystemInformation};
+use common::uefi::{boot_service::EfiBootServices, file, EfiConfigurationTable, EfiHandle, EfiStatus, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+use common::{cpu, console, print, println, pr_debug};
 
 static mut IMAGE_HANDLE: EfiHandle = 0;
 static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
@@ -33,13 +29,6 @@ static mut DTB_ADDRESS: Option<NonZeroUsize> = None;
 static mut ORIGINAL_PAGE_TABLE: usize = 0;
 
 static mut BOOT_SERVICES: *const EfiBootServices = core::ptr::null();
-
-#[macro_export]
-macro_rules! bitmask {
-    ($high:expr,$low:expr) => {
-        ((1 << (($high - $low) + 1)) - 1) << $low
-    };
-}
 
 #[no_mangle]
 extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> ! {

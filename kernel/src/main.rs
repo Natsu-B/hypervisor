@@ -27,15 +27,11 @@ use core::num::NonZeroUsize;
 use core::usize;
 
 use exception::setup_exception;
-use print::set_color;
-use uefi::serial_port::SerialPortInfo;
-use uefi::EfiConfigurationTable;
-use system_info::SystemInformation;
-
-use crate::cpu::*;
+//use print::set_color;
+use common::{SystemInformation, cpu::*, println, console};
 use crate::paging::PAGE_SHIFT;
 use crate::paging::PAGE_SIZE;
-use crate::uefi::{EfiHandle, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+use common::uefi::{EfiHandle, EfiSystemTable, EfiStatus, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
 
 const PL011: usize = 0x900_0000; //for qm
 //const PL011: usize = 0x107D001000;//for raspi 5
@@ -44,17 +40,12 @@ const RANGE: usize = 0x1000;
 const UART_DR: usize = 0x000;
 const UART_FR: usize = 0x018;
 
-#[macro_use]
-mod console;
-mod cpu;
 mod exception;
 mod paging;
-mod print;
-mod uefi;
+//mod print;
 mod mmio {
     pub mod pl011;
 }
-mod system_info;
 
 static mut IMAGE_HANDLE: EfiHandle = 0;
 static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
@@ -62,13 +53,6 @@ static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
 pub const ALLOC_SIZE: usize = 256 * 1024 * 1024; /* 256 MB */
 pub const MAX_PHYSICAL_ADDRESS: usize = (1 << (48 + 1)) - 1;
 pub const STACK_PAGES: usize = 16;
-
-#[macro_export]
-macro_rules! bitmask {
-    ($high:expr,$low:expr) => {
-        ((1 << (($high - $low) + 1)) - 1) << $low
-    };
-}
 
 #[no_mangle]
 extern "C" fn main(
@@ -237,6 +221,7 @@ fn set_up_el1() {
 }
 
 extern "C" fn el1_main() -> ! {
+    /*
     use crate::print::put_free;
     set_color(2);
     put_free("Hello,");
@@ -251,7 +236,11 @@ extern "C" fn el1_main() -> ! {
     set_color(6);
     put_free(" hypervisor!!\n");
     set_color(0);
-
+    */
+    println!("Helloworld!\nLet's make a hypervisor!\n");
+    for _ in 0..20 {
+        println!("\n");
+    }
     //halt_loop();
     exit_bootloader();
 }
@@ -260,7 +249,7 @@ fn exit_bootloader() -> ! {
     unsafe {
         ((*(*SYSTEM_TABLE).efi_boot_services).exit)(
             IMAGE_HANDLE,
-            uefi::EfiStatus::EfiSuccess,
+            EfiStatus::EfiSuccess,
             0,
             core::ptr::null(),
         );

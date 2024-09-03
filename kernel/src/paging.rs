@@ -25,7 +25,8 @@
 
 use core::{default, panic, usize};
 
-use crate::{allocate_memory, bitmask, console::print, cpu::*};
+use crate::allocate_memory;
+use common::{println, bitmask, cpu::*};
 
 pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;

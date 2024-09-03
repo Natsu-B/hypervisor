@@ -11,9 +11,12 @@
 
 #![allow(dead_code)]
 
-use crate::{bitmask, paging::PAGE_MASK, paging::PAGE_SHIFT};
-
 use core::arch::asm;
+use crate::bitmask;
+
+pub const PAGE_SHIFT: usize = 12;
+pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
+pub const PAGE_MASK: usize = !(PAGE_SIZE - 1);
 
 #[derive(Clone)]
 pub struct InterruptFlag(u64);

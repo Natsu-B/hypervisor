@@ -9,17 +9,15 @@
 //! Paging
 //!
 
-use crate::cpu::{
+use common::cpu::{
     clean_data_cache_all, flush_tlb_el2, get_mair_el2, get_tcr_el2, get_ttbr0_el2,
     TCR_EL2_DS_BIT_OFFSET_WITHOUT_E2H, TCR_EL2_DS_WITHOUT_E2H,
     TCR_EL2_T0SZ_BITS_OFFSET_WITHOUT_E2H, TCR_EL2_T0SZ_WITHOUT_E2H,
     TCR_EL2_TG0_BITS_OFFSET_WITHOUT_E2H, TCR_EL2_TG0_WITHOUT_E2H,
+    PAGE_MASK, PAGE_SHIFT, PAGE_SIZE
 };
-use crate::{allocate_memory, bitmask};
-
-pub const PAGE_SHIFT: usize = 12;
-pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
-pub const PAGE_MASK: usize = !(PAGE_SIZE - 1);
+use crate::allocate_memory;
+use common::{println, pr_debug, bitmask};
 
 pub const PAGE_TABLE_SIZE: usize = 0x1000;
 

@@ -14,13 +14,14 @@
 
 //例外テーブルつくるよ
 
-use crate::cpu::*;
+use common::cpu::*;
 use crate::get_esr_el2;
 use crate::mmio::pl011;
 use crate::PL011;
 use crate::RANGE;
 use core::arch::global_asm;
 use core::u64;
+use common::{pr_debug, println, print};
 
 pub const ESR_EL2_EC_BITS_OFFSET: u64 = 26;
 pub const ESR_EL2_EC: u64 = 0b111111 << ESR_EL2_EC_BITS_OFFSET;
