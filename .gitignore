@@ -1,4 +1,5 @@
 /bin
+/doc/scrap
 target
 Cargo.lock
 QEMU_EFI.fd

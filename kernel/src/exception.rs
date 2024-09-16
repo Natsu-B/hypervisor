@@ -14,14 +14,14 @@
 
 //例外テーブルつくるよ
 
-use common::cpu::*;
 use crate::get_esr_el2;
 use crate::mmio::pl011;
-use crate::PL011;
 use crate::RANGE;
+use common::cpu::*;
+use common::SERIAL_PORT;
+use common::{pr_debug, print, println};
 use core::arch::global_asm;
 use core::u64;
-use common::{pr_debug, println, print};
 
 pub const ESR_EL2_EC_BITS_OFFSET: u64 = 26;
 pub const ESR_EL2_EC: u64 = 0b111111 << ESR_EL2_EC_BITS_OFFSET;
@@ -38,7 +38,7 @@ pub const HPFAR_EL2_FIPA_BITS_OFFSET: u64 = 4;
 pub const HPFAR_EL2_FIPA: u64 = ((1 << 44) - 1) & !((1 << 4) - 1);
 
 const EC_SMC_AA64: u64 = 0b010111;
-const EC_DATA_ABORT:u64 = 0b100100;
+const EC_DATA_ABORT: u64 = 0b100100;
 const UART_DR: usize = 0x000;
 const UART_FR: usize = 0x018;
 
@@ -247,7 +247,7 @@ extern "C" fn synchronous_handler(registers: *mut Registers) {
             let regs = unsafe { &mut *registers };
             let smc_number = 0; // esr_el2 & bitmask!(15, 0);
             pr_debug!("SecureMonitor Call: {:#X}", smc_number);
-            pr_debug!("Registers: {:#X?}", regs);
+            //pr_debug!("Registers: {:#X?}", regs);
             if regs.x0 == 0xC400_0003 {
                 regs.x0 = (u64::MAX - 2);
                 println!("Prevent smp");
@@ -305,10 +305,11 @@ fn data_abort_handler(registers: &mut Registers, esr_el2: u64) {
     let address = (((get_hpfar_el2() & HPFAR_EL2_FIPA) >> HPFAR_EL2_FIPA_BITS_OFFSET)
         << crate::paging::PAGE_SHIFT)
         | (get_far_el2() & ((1 << crate::paging::PAGE_SHIFT) - 1));
-
-    if (PL011 as u64..(PL011 + RANGE) as u64).contains(&address) {
+    if let Some(pl011_address) = unsafe { SERIAL_PORT }
+        && (pl011_address as u64..(pl011_address + RANGE) as u64).contains(&address)
+    {
         /* PL011 */
-        let offset = (address - PL011 as u64) as usize;
+        let offset = (address - pl011_address as u64) as usize;
         if is_write_access {
             let register_value = if is_64bit_register {
                 *register
@@ -331,7 +332,6 @@ fn data_abort_handler(registers: &mut Registers, esr_el2: u64) {
             *register
         );
     }
-
     advance_elr_el2();
 }
 

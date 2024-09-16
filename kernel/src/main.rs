@@ -22,6 +22,8 @@
 #![no_std]
 #![no_main]
 
+#![feature(let_chains)]
+
 use core::arch::asm;
 use core::num::NonZeroUsize;
 use core::usize;
@@ -32,16 +34,11 @@ use common::{SystemInformation, cpu::*, println, console};
 use crate::paging::PAGE_SHIFT;
 use crate::paging::PAGE_SIZE;
 use common::uefi::{EfiHandle, EfiSystemTable, EfiStatus, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
-
-const PL011: usize = 0x900_0000; //for qm
-//const PL011: usize = 0x107D001000;//for raspi 5
-const RANGE: usize = 0x1000;
-
-const UART_DR: usize = 0x000;
-const UART_FR: usize = 0x018;
+use common::{SERIAL_PORT,RANGE,PL011_QEMU};
 
 mod exception;
 mod paging;
+//mod multi_core;
 //mod print;
 mod mmio {
     pub mod pl011;
@@ -70,12 +67,18 @@ extern "C" fn main(
 
     if let Some(serial_port) = system_info.serial_port
     {
+        unsafe { SERIAL_PORT = Some(serial_port) }//SERIAL_PORT will changed by kernel only this point
         paging::setup_stage_2_translation(serial_port, RANGE)
             .expect("Failed to setup Stage2 Paging");
     } else {
-        println!("Error: Cannot detect serial port");
-        paging::setup_stage_2_translation(PL011, RANGE);
+        println!("Error: Cannot detect serial port. Assume running in Qemu virt device...");
+        unsafe { SERIAL_PORT = Some(PL011_QEMU)};
+        paging::setup_stage_2_translation(PL011_QEMU, RANGE);
     }
+
+    //if let Some((spin_table_address, spin_table_length)) = system_info.spin_table_info {
+    //    multi_core::init_spin_table(spin_table_address,spin_table_length.into());
+    //}
 
     /* Stack for BSP */
     let stack_address = allocate_memory(STACK_PAGES, None).expect("Failed to alloc stack")

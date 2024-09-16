@@ -12,30 +12,32 @@
 //See the License for the specific language governing permissions and
 //limitations under the License.
 
-use crate::print::set_color;
-
 use core::panic;
 
-use crate::print::putc;
-use crate::PL011;
-use crate::UART_DR;
-use crate::UART_FR;
+use common::print::putc_check;
+use common::{SERIAL_PORT, UART_DR, UART_FR};
 
 pub fn mmio_read(offset: usize, _access_width: u64) -> Result<u64, ()> {
-    let data = unsafe { core::ptr::read_volatile((PL011 + offset) as *mut u32) as u64 };
-    Ok(data)
+    if let Some(pl011) = unsafe {SERIAL_PORT} {
+        let data = unsafe { core::ptr::read_volatile((pl011 + offset) as *mut u32) as u64 };
+        Ok(data)
+    }else{panic!();}
 }
 
 pub fn mmio_write(offset: usize /*, _access_width: u64*/, value: u64) -> Result<(), ()> {
     //println!("{:#X}",value);
     match offset {
         UART_DR => {
-            putc(value as u8);
+            putc_check(value as u8);
             Ok(())
         }
         _ => {
-            unsafe {
-                core::ptr::write_volatile((PL011 + offset) as *mut u32, value as u32);
+            if let Some(pl011) = unsafe { SERIAL_PORT } {
+                unsafe {
+                    core::ptr::write_volatile((pl011 + offset) as *mut u32, value as u32);
+                }
+            } else {
+                panic!();
             }
             Ok(())
         }
