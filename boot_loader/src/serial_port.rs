@@ -19,7 +19,7 @@ fn try_to_get_serial_info_from_acpi(rsdp_address: usize) -> Option<usize> {
     let serial_port_type = unsafe { *((table_address + 36) as *const u8) };
     let address =
         GeneralAddressStructure::new(unsafe { &*((table_address + 40) as *const [u8; 12]) });
-    //println!("SerialPort: {:#X?}(Type: {:#X})", address, serial_port_type);
+    println!("SerialPort: {:#X?}(Type: {:#X})", address, serial_port_type);
     if address.get_address_type() != GeneralAddressStructure::SPACE_ID_SYSTEM_MEMORY {
         println!("Invalid Address Type");
         return None;

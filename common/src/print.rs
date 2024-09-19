@@ -39,31 +39,15 @@ pub fn put(input: &str) {
     }
 }
 
+pub fn put_unsafe(input: &str, serial_port: usize) {
+    for i in input.chars() {
+        putc(i as u8, serial_port);
+    }
+}
+
 // put char PL011
-// This does not check that SERIAL_PORT is not None, if you want to use this alone use putc_check.
+// This does not check that SERIAL_PORT is not None. If you want to use this alone use putc_check.
 fn putc(c: u8, serial_port: usize) {
-    /* //Remove ANSI Escape sequence
-    if c == 0x1b {
-        unsafe {
-            ignore_esc = 1;
-        }
-    } else if unsafe { ignore_esc == 1 } && c == b'[' {
-        unsafe {
-            ignore_esc = 2;
-        }
-    } else if unsafe { ignore_esc == 2 } {
-        if (0x40..=0x7E).contains(&c) {
-            unsafe {
-                ignore_esc = 0;
-            }
-        } //ここまでcolorコードの対処
-    } else {
-        unsafe{random = random.overflowing_add(1).0;}
-        putc_free(0x1b);
-        unsafe{print!("[38;5;{}m",random)};
-        putc_free(0x1b);
-        unsafe{print!("[48;5;{}m",255-random)};
-    }*/
     if c == b'\n' {
         loop_write_char(b'\r', serial_port);
     }

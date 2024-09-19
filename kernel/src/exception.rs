@@ -247,7 +247,7 @@ extern "C" fn synchronous_handler(registers: *mut Registers) {
             let regs = unsafe { &mut *registers };
             let smc_number = 0; // esr_el2 & bitmask!(15, 0);
             pr_debug!("SecureMonitor Call: {:#X}", smc_number);
-            //pr_debug!("Registers: {:#X?}", regs);
+            pr_debug!("Registers: {:#X?}", regs);
             if regs.x0 == 0xC400_0003 {
                 regs.x0 = (u64::MAX - 2);
                 println!("Prevent smp");

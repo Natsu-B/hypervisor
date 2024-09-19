@@ -46,7 +46,7 @@ extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTabl
 
     let serial_port_address =
         serial_port::detect_serial_port(unsafe { ACPI_20_TABLE_ADDRESS }, unsafe { DTB_ADDRESS });
-    if let Some(i) = serial_port_address {//Do not call println before here!
+    if let Some(i) = serial_port_address {//println called before here is print via uefi simple text output protocol.
         unsafe { SERIAL_PORT = Some(i) }
     }
 
@@ -96,12 +96,12 @@ fn detect_acpi_and_dtb(system_table: &EfiSystemTable) {
                 + i * core::mem::size_of::<EfiConfigurationTable>())
                 as *const EfiConfigurationTable)
         };
-        //pr_debug!("GUID: {:#X?}", table.vendor_guid);
+        pr_debug!("GUID: {:#X?}", table.vendor_guid);
         if table.vendor_guid == EFI_DTB_TABLE_GUID {
-        //    pr_debug!("Detect DTB");
+        pr_debug!("Detect DTB");
             unsafe { DTB_ADDRESS = NonZeroUsize::new(table.vendor_table) };
         } else if table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
-        //    pr_debug!("Detect ACPI 2.0");
+        pr_debug!("Detect ACPI 2.0");
             unsafe { ACPI_20_TABLE_ADDRESS = NonZeroUsize::new(table.vendor_table) };
         }
     }
@@ -127,7 +127,7 @@ fn detect_spin_table(
     };
     let Ok(Some(release_addr)) = cpu_node.get_prop_as_u32(b"cpu-release-addr", &dtb_analyzer)
     else {
-        pr_debug!("Faiked to find cpu-release-addr");
+        pr_debug!("Failed to find cpu-release-addr");
         return None;
     };
     let base_address = ((u32::from_be(release_addr[0]) as usize) << u32::BITS)
