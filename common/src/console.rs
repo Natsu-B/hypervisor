@@ -10,6 +10,7 @@
 //!
 
 use crate::uefi::{output::EfiOutputProtocol, EfiStatus};
+use crate::SERIAL_PORT;
 
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -35,9 +36,17 @@ impl Console {
 
 impl fmt::Write for Console {
     fn write_str(&mut self, string: &str) -> fmt::Result {
-        //crate::print::put_free(string);
-        crate::print::put_free(string);
-        Ok(())
+        if let Some(serial_port) = unsafe { SERIAL_PORT } {
+            crate::print::put_unsafe(string,serial_port);
+            Ok(())
+        } else {
+            let result = unsafe { self.uefi_output_console.assume_init().output(string) };
+            if result == EfiStatus::EfiSuccess {
+                Ok(())
+            } else {
+                Err(fmt::Error)
+            }
+        }
     }
 }
 
@@ -60,16 +69,8 @@ macro_rules! println {
     ($fmt:expr, $($arg:tt)*) => ($crate::console::print(format_args!("{}\n", format_args!($fmt, $($arg)*))));
 }
 
-#[cfg(debug_assertions)]
 #[macro_export]
 macro_rules! pr_debug {
     ($fmt:expr) => (println!($fmt));
     ($fmt:expr, $($arg:tt)*) => (println!($fmt, $($arg)*));
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! pr_debug {
-    ($fmt:expr) => {};
-    ($fmt:expr, $($arg:tt)*) => {};
 }

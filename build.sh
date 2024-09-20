@@ -1,15 +1,15 @@
 #!/bin/bash
 
-CRATE_DIRS=("kernel" "mini_loader")
+CRATE_DIRS=("kernel" "boot_loader")
 
 run_cargo_command() {
     local dir_path=$1
     local command=$2
-    
+
     echo "Running '$command' in $dir_path..."
-    
+
     (cd "$dir_path" && cargo $command)
-    
+
     if [ $? -eq 0 ]; then
         echo "Success in $dir_path"
     else
@@ -28,8 +28,8 @@ check_efi_file() {
     local dir_path=$1
     local file="./$dir_path/target/aarch64-unknown-none/release/$dir_path"
     local efi_file="./$dir_path/target/aarch64-unknown-uefi/release/$dir_path.efi"
-    
-    if [ $dir_path = "mini_loader" ]; then
+
+    if [ $dir_path = "boot_loader" ]; then
         if [ -f "$efi_file" ]; then
             echo "$efi_file exists."
             mv $efi_file ./bin/EFI/BOOT/BOOTAA64.EFI

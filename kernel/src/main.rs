@@ -22,91 +22,63 @@
 #![no_std]
 #![no_main]
 
+#![feature(let_chains)]
+
 use core::arch::asm;
 use core::num::NonZeroUsize;
 use core::usize;
 
 use exception::setup_exception;
-use print::set_color;
-use uefi::serial_port::SerialPortInfo;
-use uefi::EfiConfigurationTable;
-
-use crate::cpu::*;
+//use print::set_color;
+use common::{SystemInformation, cpu::*, println, console};
 use crate::paging::PAGE_SHIFT;
 use crate::paging::PAGE_SIZE;
-use crate::uefi::{EfiHandle, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+use common::uefi::{EfiHandle, EfiSystemTable, EfiStatus, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
+use common::{SERIAL_PORT,RANGE,PL011_QEMU};
 
-const PL011: usize = 0x900_0000; //for qm
-//const PL011: usize = 0x107D001000;//for raspi 5
-const RANGE: usize = 0x1000;
-
-const UART_DR: usize = 0x000;
-const UART_FR: usize = 0x018;
-
-#[macro_use]
-mod console;
-mod cpu;
 mod exception;
 mod paging;
-mod print;
-mod uefi;
+//mod multi_core;
+//mod print;
 mod mmio {
     pub mod pl011;
 }
-mod serial_port;
 
 static mut IMAGE_HANDLE: EfiHandle = 0;
 static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
-static mut ACPI_20_TABLE_ADDRESS: Option<NonZeroUsize> = None;
-static mut DTB_ADDRESS: Option<NonZeroUsize> = None;
-
 /// The memory size to allocate
 pub const ALLOC_SIZE: usize = 256 * 1024 * 1024; /* 256 MB */
 pub const MAX_PHYSICAL_ADDRESS: usize = (1 << (48 + 1)) - 1;
 pub const STACK_PAGES: usize = 16;
-
-#[macro_export]
-macro_rules! bitmask {
-    ($high:expr,$low:expr) => {
-        ((1 << (($high - $low) + 1)) - 1) << $low
-    };
-}
 
 #[no_mangle]
 extern "C" fn main(
     image_handle: EfiHandle,
     system_table: *mut EfiSystemTable,
     original_page_table: usize,
+    system_info: SystemInformation,
 ) -> ! {
     let system_table = unsafe { &*system_table };
-    detect_acpi_and_dtb(system_table);
-
     unsafe {
         IMAGE_HANDLE = image_handle;
         SYSTEM_TABLE = system_table;
         console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol);
     }
 
-    //assert_eq!(get_current_el() >> 2, 2, "Expected CurrentEL is EL2");
-    if get_current_el() >> 2 != 2 {
-        println!("Expected CurrentEL is EL2");
-        exit_bootloader();
+    if let Some(serial_port) = system_info.serial_port
+    {
+        unsafe { SERIAL_PORT = Some(serial_port) }//SERIAL_PORT will changed by kernel only this point
+        paging::setup_stage_2_translation(serial_port, RANGE)
+            .expect("Failed to setup Stage2 Paging");
+    } else {
+        println!("Error: Cannot detect serial port. Assume running in Qemu virt device...");
+        unsafe { SERIAL_PORT = Some(PL011_QEMU)};
+        paging::setup_stage_2_translation(PL011_QEMU, RANGE);
     }
 
-    if let Some(SerialPortInfo {
-        physical_address,
-        virtual_address: _,
-        port_type: _,
-    }) =
-        serial_port::detect_serial_port(unsafe { ACPI_20_TABLE_ADDRESS }, unsafe { DTB_ADDRESS })
-    {
-        println!("Serial port detected at: {:#X}", physical_address);
-        paging::setup_stage_2_translation(physical_address, RANGE)
-            .expect("Failed to setup Stage2 Paging"); //ここ変える
-    } else {
-        println!("Error: Cannot detect serial port");
-        paging::setup_stage_2_translation(PL011, RANGE);
-    }
+    //if let Some((spin_table_address, spin_table_length)) = system_info.spin_table_info {
+    //    multi_core::init_spin_table(spin_table_address,spin_table_length.into());
+    //}
 
     /* Stack for BSP */
     let stack_address = allocate_memory(STACK_PAGES, None).expect("Failed to alloc stack")
@@ -122,29 +94,6 @@ extern "C" fn main(
     /* Jump to EL1(el1_main) */
     el2_to_el1(el1_main as *const fn() as usize, stack_address);
     panic!("Failed to jump EL1");
-}
-
-/// Analyze EfiSystemTable and store [`ACPI_20_TABLE_ADDRESS`] and [`DTB_ADDRESS`]
-///
-/// # Arguments
-/// * system_table: Efi System Table
-/// * b_s: EfiBootService
-fn detect_acpi_and_dtb(system_table: &EfiSystemTable) {
-    for i in 0..system_table.num_table_entries {
-        let table = unsafe {
-            &*((system_table.configuration_table
-                + i * core::mem::size_of::<EfiConfigurationTable>())
-                as *const EfiConfigurationTable)
-        };
-        pr_debug!("GUID: {:#X?}", table.vendor_guid);
-        if table.vendor_guid == EFI_DTB_TABLE_GUID {
-            pr_debug!("Detect DTB");
-            unsafe { DTB_ADDRESS = NonZeroUsize::new(table.vendor_table) };
-        } else if table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
-            pr_debug!("Detect ACPI 2.0");
-            unsafe { ACPI_20_TABLE_ADDRESS = NonZeroUsize::new(table.vendor_table) };
-        }
-    }
 }
 
 /// Allocate memory
@@ -275,6 +224,7 @@ fn set_up_el1() {
 }
 
 extern "C" fn el1_main() -> ! {
+    /*
     use crate::print::put_free;
     set_color(2);
     put_free("Hello,");
@@ -289,7 +239,11 @@ extern "C" fn el1_main() -> ! {
     set_color(6);
     put_free(" hypervisor!!\n");
     set_color(0);
-
+    */
+    println!("Helloworld!\nLet's make a hypervisor!\n");
+    for _ in 0..20 {
+        println!("\n");
+    }
     //halt_loop();
     exit_bootloader();
 }
@@ -298,7 +252,7 @@ fn exit_bootloader() -> ! {
     unsafe {
         ((*(*SYSTEM_TABLE).efi_boot_services).exit)(
             IMAGE_HANDLE,
-            uefi::EfiStatus::EfiSuccess,
+            EfiStatus::EfiSuccess,
             0,
             core::ptr::null(),
         );

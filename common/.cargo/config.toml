@@ -1,0 +1,3 @@
+[build]
+target = "aarch64-unknown-uefi"
+rustflags = ["-C", "link-args=/debug:dwarf"]
