@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 CRATE_DIRS=("kernel" "boot_loader" "common")
 

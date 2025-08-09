@@ -1,0 +1,13 @@
+[package]
+name = "mutex"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+[dev-dependencies]
+core_affinity = "0.8.3"
+
+[profile.release]
+panic = 'abort'
+[profile.dev]
+panic = 'abort'

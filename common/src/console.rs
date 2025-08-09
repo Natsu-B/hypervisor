@@ -9,18 +9,20 @@
 //! Console with UEFI Output Protocol
 //!
 
-use crate::uefi::{output::EfiOutputProtocol, EfiStatus};
 use crate::SERIAL_PORT;
+use crate::uefi::{EfiStatus, output::EfiOutputProtocol};
 
 use core::fmt;
 use core::mem::MaybeUninit;
+use core::ops::{Deref, DerefMut};
+use mutex::SpinLock;
 
 pub struct Console {
     uefi_output_console: MaybeUninit<&'static EfiOutputProtocol>,
     //write_lock: SpinLockFlag, // Currently, Bootloader runs only BSP. Therefore the lock is not necessary.
 }
 
-pub static mut DEFAULT_CONSOLE: Console = Console::new();
+pub static mut DEFAULT_CONSOLE: SpinLock<Console> = SpinLock::new(Console::new());
 
 impl Console {
     pub const fn new() -> Self {
@@ -37,7 +39,7 @@ impl Console {
 impl fmt::Write for Console {
     fn write_str(&mut self, string: &str) -> fmt::Result {
         if let Some(serial_port) = unsafe { SERIAL_PORT } {
-            crate::print::put_unsafe(string,serial_port);
+            crate::print::put_unsafe(string, serial_port);
             Ok(())
         } else {
             let result = unsafe { self.uefi_output_console.assume_init().output(string) };
@@ -52,7 +54,8 @@ impl fmt::Write for Console {
 
 pub fn print(args: fmt::Arguments) {
     use fmt::Write;
-    let result = unsafe { DEFAULT_CONSOLE.write_fmt(args) };
+    let mut lock = unsafe { (*(&raw mut DEFAULT_CONSOLE)).lock() };
+    let result = lock.deref_mut().write_fmt(args);
     if result.is_err() {
         panic!("write_fmt was failed.");
     }

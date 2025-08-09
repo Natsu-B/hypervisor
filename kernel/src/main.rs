@@ -21,7 +21,6 @@
 
 #![no_std]
 #![no_main]
-
 #![feature(let_chains)]
 
 use core::arch::asm;
@@ -30,11 +29,13 @@ use core::usize;
 
 use exception::setup_exception;
 //use print::set_color;
-use common::{SystemInformation, cpu::*, println, console};
 use crate::paging::PAGE_SHIFT;
 use crate::paging::PAGE_SIZE;
-use common::uefi::{EfiHandle, EfiSystemTable, EfiStatus, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
-use common::{SERIAL_PORT,RANGE,PL011_QEMU};
+use common::uefi::{
+    EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID, EfiHandle, EfiStatus, EfiSystemTable,
+};
+use common::{PL011_QEMU, RANGE, SERIAL_PORT};
+use common::{SystemInformation, console, cpu::*, println};
 
 mod exception;
 mod paging;
@@ -51,7 +52,7 @@ pub const ALLOC_SIZE: usize = 256 * 1024 * 1024; /* 256 MB */
 pub const MAX_PHYSICAL_ADDRESS: usize = (1 << (48 + 1)) - 1;
 pub const STACK_PAGES: usize = 16;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn main(
     image_handle: EfiHandle,
     system_table: *mut EfiSystemTable,
@@ -62,17 +63,18 @@ extern "C" fn main(
     unsafe {
         IMAGE_HANDLE = image_handle;
         SYSTEM_TABLE = system_table;
-        console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol);
+        (*(&raw mut console::DEFAULT_CONSOLE))
+            .lock()
+            .init((*system_table).console_output_protocol);
     }
 
-    if let Some(serial_port) = system_info.serial_port
-    {
-        unsafe { SERIAL_PORT = Some(serial_port) }//SERIAL_PORT will changed by kernel only this point
+    if let Some(serial_port) = system_info.serial_port {
+        unsafe { SERIAL_PORT = Some(serial_port) } //SERIAL_PORT will changed by kernel only this point
         paging::setup_stage_2_translation(serial_port, RANGE)
             .expect("Failed to setup Stage2 Paging");
     } else {
         println!("Error: Cannot detect serial port. Assume running in Qemu virt device...");
-        unsafe { SERIAL_PORT = Some(PL011_QEMU)};
+        unsafe { SERIAL_PORT = Some(PL011_QEMU) };
         paging::setup_stage_2_translation(PL011_QEMU, RANGE);
     }
 
@@ -128,18 +130,18 @@ pub fn allocate_memory(pages: usize, align: Option<usize>) -> Result<usize, ()> 
         }
     }
 } /*
-  pub fn allocate_memory(pages: usize, align: Option<usize>) -> Result<usize, ()> {
-      let align = align.unwrap_or(PAGE_SHIFT);
-      loop {
-          let address = unsafe { &*((*SYSTEM_TABLE).efi_boot_services) }
-              .alloc_highest_memory(pages, MAX_PHYSICAL_ADDRESS)
-              .expect("Failed to init memory pool");
-          if (address & ((1 << align) - 1)) != 0 {
-              continue;
-          }
-          return Ok(address);
-      }
-  }*/
+pub fn allocate_memory(pages: usize, align: Option<usize>) -> Result<usize, ()> {
+let align = align.unwrap_or(PAGE_SHIFT);
+loop {
+let address = unsafe { &*((*SYSTEM_TABLE).efi_boot_services) }
+.alloc_highest_memory(pages, MAX_PHYSICAL_ADDRESS)
+.expect("Failed to init memory pool");
+if (address & ((1 << align) - 1)) != 0 {
+continue;
+}
+return Ok(address);
+}
+}*/
 
 fn set_up_el1() {
     /* CNTHCTL_EL2 & CNTVOFF_EL2 */

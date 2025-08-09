@@ -29,16 +29,16 @@ static mut ORIGINAL_PAGE_TABLE: usize = 0;
 
 static mut BOOT_SERVICES: *const EfiBootServices = core::ptr::null();
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> ! {
-    unsafe { console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol) };
+    unsafe { (*(&raw mut console::DEFAULT_CONSOLE)).lock().init((*system_table).console_output_protocol) };
     let b_s = unsafe { &*((*system_table).efi_boot_services) };
     unsafe { BOOT_SERVICES = b_s };
     let system_table_ref = unsafe { &*system_table };
     unsafe {
         IMAGE_HANDLE = image_handle;
         SYSTEM_TABLE = system_table;
-        console::DEFAULT_CONSOLE.init((*system_table).console_output_protocol);
+        (*(&raw mut console::DEFAULT_CONSOLE)).lock().init((*system_table).console_output_protocol);
     }
 
     detect_acpi_and_dtb(system_table_ref);

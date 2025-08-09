@@ -43,6 +43,7 @@ const UART_DR: usize = 0x000;
 const UART_FR: usize = 0x018;
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct Registers {
     pub x0: u64,
     pub x1: u64,
@@ -229,10 +230,10 @@ exit_exception:
 "
 );
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn irq_handler() {}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn synchronous_handler(registers: *mut Registers) {
     /*println!("Synchronous Exception!");
     println!("Fault at {:#X}", get_elr_el2());*/
@@ -336,7 +337,7 @@ fn data_abort_handler(registers: &mut Registers, esr_el2: u64) {
 }
 
 pub fn setup_exception() {
-    extern "C" {
+    unsafe extern "C" {
         static exception_table: *const u8;
     }
     unsafe { set_vbar_el2(&exception_table as *const _ as usize as u64) }
