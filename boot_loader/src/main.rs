@@ -12,13 +12,16 @@ mod elf;
 mod paging;
 mod serial_port;
 
+use common::cpu::{PAGE_MASK, PAGE_SHIFT};
+use common::uefi::{
+    EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID, EfiConfigurationTable, EfiHandle, EfiStatus,
+    EfiSystemTable, boot_service::EfiBootServices, file,
+};
+use common::{SERIAL_PORT, cpu::*};
+use common::{SystemInformation, uefi};
+use common::{console, cpu, pr_debug, println};
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
-use common::{cpu::*, SERIAL_PORT};
-use common::cpu::{PAGE_MASK, PAGE_SHIFT};
-use common::{uefi, SystemInformation};
-use common::uefi::{boot_service::EfiBootServices, file, EfiConfigurationTable, EfiHandle, EfiStatus, EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
-use common::{cpu, console, println, pr_debug};
 
 static mut IMAGE_HANDLE: EfiHandle = 0;
 static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
@@ -31,22 +34,28 @@ static mut BOOT_SERVICES: *const EfiBootServices = core::ptr::null();
 
 #[unsafe(no_mangle)]
 extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> ! {
-    unsafe { (*(&raw mut console::DEFAULT_CONSOLE)).lock().init((*system_table).console_output_protocol) };
+    unsafe {
+        (*(&raw mut console::DEFAULT_CONSOLE))
+            .lock()
+            .init((*system_table).console_output_protocol)
+    };
     let b_s = unsafe { &*((*system_table).efi_boot_services) };
     unsafe { BOOT_SERVICES = b_s };
     let system_table_ref = unsafe { &*system_table };
     unsafe {
         IMAGE_HANDLE = image_handle;
         SYSTEM_TABLE = system_table;
-        (*(&raw mut console::DEFAULT_CONSOLE)).lock().init((*system_table).console_output_protocol);
+        (*(&raw mut console::DEFAULT_CONSOLE))
+            .lock()
+            .init((*system_table).console_output_protocol);
     }
 
     detect_acpi_and_dtb(system_table_ref);
 
-
     let serial_port_address =
         serial_port::detect_serial_port(unsafe { ACPI_20_TABLE_ADDRESS }, unsafe { DTB_ADDRESS });
-    if let Some(i) = serial_port_address {//println called before here is print via uefi simple text output protocol.
+    if let Some(i) = serial_port_address {
+        //println called before here is print via uefi simple text output protocol.
         unsafe { SERIAL_PORT = Some(i) }
     }
 
@@ -58,22 +67,14 @@ extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTabl
 
     println!("Call the hypervisor(Entry Point: {:#X})", entry_point);
 
-    let spin_table_info = if let Some(dtb_address) = unsafe { DTB_ADDRESS }{
-        detect_spin_table(dtb_address.into())
-    } else {
-        println!("Error: DTB_ADDRESS isn't correct");
-        None
+    let system_info = SystemInformation {
+        spin_table_info: None,
+        serial_port: serial_port_address,
     };
 
     dsb();
     isb();
 
-    let system_info = SystemInformation {
-        spin_table_info: spin_table_info,
-        serial_port: serial_port_address,
-    };
-
-    //Maybe I should add dsb() and isb()
     unsafe {
         (core::mem::transmute::<
             usize,
@@ -98,53 +99,13 @@ fn detect_acpi_and_dtb(system_table: &EfiSystemTable) {
         };
         pr_debug!("GUID: {:#X?}", table.vendor_guid);
         if table.vendor_guid == EFI_DTB_TABLE_GUID {
-        pr_debug!("Detect DTB");
+            pr_debug!("Detect DTB");
             unsafe { DTB_ADDRESS = NonZeroUsize::new(table.vendor_table) };
         } else if table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
-        pr_debug!("Detect ACPI 2.0");
+            pr_debug!("Detect ACPI 2.0");
             unsafe { ACPI_20_TABLE_ADDRESS = NonZeroUsize::new(table.vendor_table) };
         }
     }
-}
-
-/// Detect spin table
-///
-/// When device tree is available, this function searches "cpu" node and check "cpu-release-addr".
-/// When "cpu-release-addr" exists, secondary processors are enabled by spin-table,
-/// This finds area of spin-table(this function assumes "cpu-release-addr" is continued linearly.)
-fn detect_spin_table(
-    dtb_address: usize,
-) -> Option<(
-    usize,        /* Base Address */
-    NonZeroUsize, /* Length */
-)> {
-    let dtb_analyzer = uefi::dtb::DtbAnalyser::new(dtb_address).unwrap();
-    let mut search_holder = dtb_analyzer.get_root_node().get_search_holder().unwrap();
-    let Ok(Some(cpu_node)) = search_holder.search_next_device_by_node_name(b"cpu", &dtb_analyzer)
-    else {
-        pr_debug!("Failed to find CPU node");
-        return None;
-    };
-    let Ok(Some(release_addr)) = cpu_node.get_prop_as_u32(b"cpu-release-addr", &dtb_analyzer)
-    else {
-        pr_debug!("Failed to find cpu-release-addr");
-        return None;
-    };
-    let base_address = ((u32::from_be(release_addr[0]) as usize) << u32::BITS)
-        | (u32::from_be(release_addr[1]) as usize);
-    let mut length = core::mem::size_of::<u64>();
-    while let Ok(Some(node)) = search_holder.search_next_device_by_node_name(b"cpu", &dtb_analyzer)
-    {
-        let Ok(Some(release_addr)) = node.get_prop_as_u32(b"cpu-release-addr", &dtb_analyzer)
-        else {
-            return None;
-        };
-        let release_address = ((u32::from_be(release_addr[0]) as usize) << u32::BITS)
-            | (u32::from_be(release_addr[1]) as usize);
-        length = release_address + core::mem::size_of::<u64>() - base_address;
-        pr_debug!("CPU Release Address: {:#X}", release_address);
-    }
-    Some((base_address, NonZeroUsize::new(length).unwrap()))
 }
 
 /// Load hypervisor_kernel to [`common::HYPERVISOR_VIRTUAL_BASE_ADDRESS`]

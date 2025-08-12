@@ -14,6 +14,7 @@ run_cargo_command() {
         echo "Success in $dir_path"
     else
         echo "Error in $dir_path"
+        exit 1
     fi
 }
 
@@ -50,4 +51,4 @@ check_efi_file() {
 
 mkdir -p bin/EFI/BOOT/
 build_projects
-./run.sh
+# ./run.sh

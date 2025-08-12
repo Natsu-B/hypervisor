@@ -21,25 +21,24 @@
 
 #![no_std]
 #![no_main]
-#![feature(let_chains)]
 
+extern crate alloc;
 use core::arch::asm;
-use core::num::NonZeroUsize;
 use core::usize;
 
 use exception::setup_exception;
 //use print::set_color;
 use crate::paging::PAGE_SHIFT;
 use crate::paging::PAGE_SIZE;
-use common::uefi::{
-    EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID, EfiHandle, EfiStatus, EfiSystemTable,
-};
+use allocator::ALLOCATOR;
+use common::uefi::EfiHandle;
+use common::uefi::{EfiStatus, EfiSystemTable};
 use common::{PL011_QEMU, RANGE, SERIAL_PORT};
 use common::{SystemInformation, console, cpu::*, println};
 
 mod exception;
+mod multi_core;
 mod paging;
-//mod multi_core;
 //mod print;
 mod mmio {
     pub mod pl011;
@@ -75,12 +74,14 @@ extern "C" fn main(
     } else {
         println!("Error: Cannot detect serial port. Assume running in Qemu virt device...");
         unsafe { SERIAL_PORT = Some(PL011_QEMU) };
-        paging::setup_stage_2_translation(PL011_QEMU, RANGE);
+        paging::setup_stage_2_translation(PL011_QEMU, RANGE)
+            .expect("Failed to setup Stage2 Paging");
     }
 
-    //if let Some((spin_table_address, spin_table_length)) = system_info.spin_table_info {
-    //    multi_core::init_spin_table(spin_table_address,spin_table_length.into());
-    //}
+    // allocate memory for global allocator
+    let pages = 10000; // TODO
+    let heap_mem = allocate_memory(pages, None).expect("failed to allocate memory");
+    ALLOCATOR.init_allocator(heap_mem, pages << PAGE_SHIFT);
 
     /* Stack for BSP */
     let stack_address = allocate_memory(STACK_PAGES, None).expect("Failed to alloc stack")
@@ -129,19 +130,7 @@ pub fn allocate_memory(pages: usize, align: Option<usize>) -> Result<usize, ()> 
             return Ok(address);
         }
     }
-} /*
-pub fn allocate_memory(pages: usize, align: Option<usize>) -> Result<usize, ()> {
-let align = align.unwrap_or(PAGE_SHIFT);
-loop {
-let address = unsafe { &*((*SYSTEM_TABLE).efi_boot_services) }
-.alloc_highest_memory(pages, MAX_PHYSICAL_ADDRESS)
-.expect("Failed to init memory pool");
-if (address & ((1 << align) - 1)) != 0 {
-continue;
 }
-return Ok(address);
-}
-}*/
 
 fn set_up_el1() {
     /* CNTHCTL_EL2 & CNTVOFF_EL2 */
@@ -226,22 +215,6 @@ fn set_up_el1() {
 }
 
 extern "C" fn el1_main() -> ! {
-    /*
-    use crate::print::put_free;
-    set_color(2);
-    put_free("Hello,");
-    set_color(4);
-    put_free("world!\n");
-    set_color(3);
-    put_free("Let's");
-    set_color(5);
-    put_free(" make");
-    set_color(7);
-    put_free(" a");
-    set_color(6);
-    put_free(" hypervisor!!\n");
-    set_color(0);
-    */
     println!("Helloworld!\nLet's make a hypervisor!\n");
     for _ in 0..20 {
         println!("\n");
@@ -283,6 +256,6 @@ fn el2_to_el1(el1_entry_point: usize, el1_stack_pointer: usize) {
 
 #[panic_handler]
 pub fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("\n\nBoot Loader Panic: {}", info);
+    println!("\n\nKernel Panic: {}", info);
     halt_loop()
 }

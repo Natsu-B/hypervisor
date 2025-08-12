@@ -14,11 +14,15 @@
 
 //例外テーブルつくるよ
 
+use crate::RANGE;
 use crate::get_esr_el2;
 use crate::mmio::pl011;
-use crate::RANGE;
-use common::cpu::*;
+use crate::multi_core::setup_new_cpu;
+use crate::panic;
 use common::SERIAL_PORT;
+use common::bitmask;
+use common::console::print;
+use common::cpu::*;
 use common::{pr_debug, print, println};
 use core::arch::global_asm;
 use core::u64;
@@ -43,7 +47,7 @@ const UART_DR: usize = 0x000;
 const UART_FR: usize = 0x018;
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Registers {
     pub x0: u64,
     pub x1: u64,
@@ -76,7 +80,7 @@ pub struct Registers {
     pub x28: u64,
     pub x29: u64,
     pub x30: u64,
-    padding: u64,
+    pub(crate) padding: u64,
 }
 
 global_asm!(
@@ -246,41 +250,81 @@ extern "C" fn synchronous_handler(registers: *mut Registers) {
             /* Adjust return address */
             advance_elr_el2();
             let regs = unsafe { &mut *registers };
-            let smc_number = 0; // esr_el2 & bitmask!(15, 0);
+            let smc_number = esr_el2 & bitmask!(15, 0);
             pr_debug!("SecureMonitor Call: {:#X}", smc_number);
             pr_debug!("Registers: {:#X?}", regs);
-            if regs.x0 == 0xC400_0003 {
-                regs.x0 = (u64::MAX - 2);
-                println!("Prevent smp");
-            } else if smc_number == 0 {
-                secure_monitor_call(
-                    &mut regs.x0,
-                    &mut regs.x1,
-                    &mut regs.x2,
-                    &mut regs.x3,
-                    &mut regs.x4,
-                    &mut regs.x5,
-                    &mut regs.x6,
-                    &mut regs.x7,
-                    &mut regs.x8,
-                    &mut regs.x9,
-                    &mut regs.x10,
-                    &mut regs.x11,
-                    &mut regs.x12,
-                    &mut regs.x13,
-                    &mut regs.x14,
-                    &mut regs.x15,
-                    &mut regs.x16,
-                    &mut regs.x17,
-                );
+
+            if smc_number == 0 {
+                if 0x8400_0000 < regs.x0 && regs.x0 < 0x8400_001F
+                    || 0xC400_0000 < regs.x0 && regs.x0 < 0xC400_001F
+                {
+                    // calling psci
+                    power_state_coordination_interface_call(regs);
+                } else {
+                    secure_monitor_call(
+                        &mut regs.x0,
+                        &mut regs.x1,
+                        &mut regs.x2,
+                        &mut regs.x3,
+                        &mut regs.x4,
+                        &mut regs.x5,
+                        &mut regs.x6,
+                        &mut regs.x7,
+                        &mut regs.x8,
+                        &mut regs.x9,
+                        &mut regs.x10,
+                        &mut regs.x11,
+                        &mut regs.x12,
+                        &mut regs.x13,
+                        &mut regs.x14,
+                        &mut regs.x15,
+                        &mut regs.x16,
+                        &mut regs.x17,
+                    );
+                }
             } else {
                 print!("SMC {:#X} is not implemented.", smc_number);
                 panic!();
-                //handler_panic!(regs, "SMC {:#X} is not implemented.", smc_number);
             }
         }
         _ => {
             panic!("Unkown Exception: {}", ec >> ESR_EL2_EC_BITS_OFFSET);
+        }
+    }
+}
+
+// power state coordination interface call
+fn power_state_coordination_interface_call(regs: &mut Registers) {
+    match regs.x0 {
+        0x8400_0002 => {
+            // CPU_OFF
+            unimplemented!();
+        }
+        0xC400_0003 => {
+            // CPU_ON
+            setup_new_cpu(regs);
+        }
+        _ => {
+            secure_monitor_call(
+                &mut regs.x0,
+                &mut regs.x1,
+                &mut regs.x2,
+                &mut regs.x3,
+                &mut regs.x4,
+                &mut regs.x5,
+                &mut regs.x6,
+                &mut regs.x7,
+                &mut regs.x8,
+                &mut regs.x9,
+                &mut regs.x10,
+                &mut regs.x11,
+                &mut regs.x12,
+                &mut regs.x13,
+                &mut regs.x14,
+                &mut regs.x15,
+                &mut regs.x16,
+                &mut regs.x17,
+            );
         }
     }
 }
