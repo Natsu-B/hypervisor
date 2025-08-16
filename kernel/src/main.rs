@@ -79,7 +79,7 @@ extern "C" fn main(
     }
 
     // allocate memory for global allocator
-    let pages = 10000; // TODO
+    let pages = 100; // TODO
     let heap_mem = allocate_memory(pages, None).expect("failed to allocate memory");
     ALLOCATOR.init_allocator(heap_mem, pages << PAGE_SHIFT);
 

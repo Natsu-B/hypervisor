@@ -9,7 +9,9 @@
 //! MultiCore Handling Functions
 //!
 
-use core::{arch::global_asm, panic};
+use core::arch::asm;
+use core::arch::naked_asm;
+use core::panic;
 
 use alloc::alloc::Layout;
 use alloc::alloc::alloc;
@@ -20,15 +22,14 @@ use common::{
 
 use crate::{STACK_PAGES, exception::Registers, paging::PAGE_SHIFT};
 
-unsafe extern "C" {
-    fn app_cpu_boot();
-}
-
 pub fn setup_new_cpu(regs: &mut Registers) {
     println!("set up new cpu...");
-    let stack_layout = Layout::from_size_align(STACK_PAGES << PAGE_SHIFT, 8).unwrap();
-    let mut stack_addr = unsafe { alloc(stack_layout) } as usize;
-    stack_addr -= STACK_PAGES;
+    let stack_layout = Layout::from_size_align(STACK_PAGES << PAGE_SHIFT, 16).unwrap();
+    let stack_addr = unsafe { alloc(stack_layout) };
+    if stack_addr.is_null() {
+        panic!("allocation failed");
+    }
+    let stack_addr = stack_addr as usize + (STACK_PAGES << PAGE_SHIFT);
     let app_start_addr =
         convert_virtual_address_to_physical_address_el2_read(app_cpu_boot as *const fn() as usize)
             .unwrap() as u64;
@@ -68,23 +69,38 @@ pub fn call_psci_function(function_id: u64, arg0: u64, arg1: u64, arg2: u64) -> 
     );
     regs.x0
 }
+pub const UART_DR: usize = 0x000;
+pub const UART_FR: usize = 0x018;
 
 #[unsafe(no_mangle)]
-extern "C" fn app_main() {
-    println!("hello app main!!!");
-    todo!();
+extern "C" fn app_main() -> ! {
+    let str = [
+        'h', 'e', 'l', 'l', 'o', ' ', 'a', 'p', 'p', ' ', 'm', 'a', 'i', 'n', '!', '!', '!', '\n',
+    ];
+    for i in str {
+        loop {
+            if unsafe { core::ptr::read_volatile((0x900_0000 + UART_FR) as *mut u8) } & (1 << 5)
+                == 0
+            {
+                unsafe { core::ptr::write_volatile((0x900_0000 + UART_DR) as *mut u8, i as u8) };
+                break;
+            }
+        }
+    }
+    loop {
+        unsafe { asm!("wfi") };
+    }
 }
 
-global_asm!(
-    r#"
-.global app_cpu_boot
-.section ".text.boot"
-
-app_cpu_boot:
+#[unsafe(naked)]
+extern "C" fn app_cpu_boot() {
+    naked_asm!(
+        "
     mov sp, x0
     b app_main
 loop:
     wfe
     b loop
-    "#
-);
+    "
+    );
+}

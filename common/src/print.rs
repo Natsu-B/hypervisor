@@ -1,4 +1,3 @@
-use crate::print;
 use crate::println;
 use crate::PL011_QEMU;
 use crate::SERIAL_PORT;

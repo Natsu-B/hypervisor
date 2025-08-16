@@ -1,10 +1,14 @@
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
+
+use common::println;
 use core::{
     alloc::{GlobalAlloc, Layout},
     cmp::max,
+    fmt,
     mem::size_of,
+    panic,
     ptr::{NonNull, null_mut},
 };
 use mutex::SpinLock;
@@ -90,13 +94,14 @@ impl LinkedList {
     /// # Safety
     /// This function is unsafe because it performs raw pointer manipulation and assumes
     /// that the provided `end_of_allocation` is a valid address within the block.
-    unsafe fn split_block(&mut self, end_of_allocation: usize) -> NonNull<LinkedList> {
+    unsafe fn split_block(&mut self, end_of_allocation: usize) {
         let address = self as *const _ as usize;
         let current_block_end = address + HEADER_SIZE + self.size;
 
         // If the remaining space is too small for a new block, don't split.
         if current_block_end - end_of_allocation <= HEADER_SIZE {
-            return unsafe { NonNull::new_unchecked(self as *mut _) };
+            let _ = unsafe { NonNull::new_unchecked(self as *mut _) };
+            return;
         }
 
         // Create a new free block in the remaining space.
@@ -118,11 +123,11 @@ impl LinkedList {
         if let Some(mut next_node) = next_node {
             unsafe { next_node.as_mut().prev_header = Some(new_node) };
         }
-        new_node
     }
 
     fn try_allocate(&mut self, size: usize, align: usize) -> Option<*mut u8> {
         if self.is_allocated {
+            println!("already allocated");
             return None;
         }
 
@@ -136,17 +141,20 @@ impl LinkedList {
         if end_of_allocation <= address + HEADER_SIZE + self.size {
             self.is_allocated = true;
 
-            let new_node = unsafe { self.split_block(end_of_allocation) };
+            unsafe { self.split_block(end_of_allocation) };
 
             // If alignment creates a gap, create a back pointer.
             if aligned_addr != address + HEADER_SIZE {
                 unsafe {
-                    BackPointer::make_back_pointer(aligned_addr - BACK_POINTER_SIZE, new_node)
+                    BackPointer::make_back_pointer(
+                        aligned_addr - BACK_POINTER_SIZE,
+                        NonNull::new_unchecked(self as *mut _),
+                    )
                 };
             }
             return Some(aligned_addr as *mut u8);
         }
-
+        println!("size too small");
         None
     }
 
@@ -223,9 +231,44 @@ impl LinkedList {
     }
 }
 
+impl fmt::Debug for LinkedList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prev = self.prev_header.map_or(core::ptr::null(), |p| p.as_ptr());
+        let next = self.next_header.map_or(core::ptr::null(), |p| p.as_ptr());
+        let status = if self.is_allocated {
+            "allocated"
+        } else {
+            "free"
+        };
+
+        f.debug_struct("LinkedList")
+            .field("addr", &(self as *const _))
+            .field("size", &format_args!("{:#x}", self.size))
+            .field("status", &status)
+            .field("prev", &prev)
+            .field("next", &next)
+            .finish()
+    }
+}
+
 // This is safe because all access to the linked list is protected by a SpinLock.
 pub struct FirstFitAllocator {
     linked_list_head: SpinLock<Option<NonNull<LinkedList>>>,
+}
+
+impl fmt::Debug for FirstFitAllocator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        let mut current = self.linked_list_head.lock();
+        let mut current_node = current
+            .as_mut()
+            .and_then(|ptr| unsafe { Some(ptr.as_mut()) });
+        while let Some(node) = current_node {
+            list.entry(node);
+            current_node = unsafe { node.get_next_node() };
+        }
+        list.finish()
+    }
 }
 
 unsafe impl Sync for FirstFitAllocator {}
@@ -240,20 +283,28 @@ impl FirstFitAllocator {
         let alignment = max(align, HEADER_SIZE);
         let mut lock = self.linked_list_head.lock();
         let mut current_node = lock.as_mut().and_then(|ptr| unsafe { Some(ptr.as_mut()) });
+        println!("allocator start");
         while let Some(node) = current_node {
             let next_node = unsafe { node.get_next_node() };
             if let Some(ptr) = node.try_allocate(size, alignment) {
+                println!("allocation success!!!");
                 return ptr;
             }
+            println!("try allocate failed");
             current_node = next_node;
         }
+        println!("allocation failed");
         null_mut::<u8>()
     }
-    pub fn free_memory(&self, ptr: usize) {
+    pub fn free_memory(&self, ptr: usize, size: usize) {
+        println!("free");
         let _lock = self.linked_list_head.lock();
         let header = unsafe {
             LinkedList::get_header(ptr).expect("address is not a memory allocated from heap")
         };
+        if !header.is_allocated || header.size < size {
+            panic!("invalid pointer");
+        }
         header.is_allocated = false;
         unsafe { header.coalesce() };
     }
@@ -288,11 +339,16 @@ pub static ALLOCATOR: FirstFitAllocator = FirstFitAllocator {
 
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.allocate_bytes(layout.size(), layout.align())
+        println!("{:#?}", self);
+        let return_data = self.allocate_bytes(layout.size(), layout.align());
+        println!("{:#?}", self);
+        return_data
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        self.free_memory(ptr as usize);
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        println!("{:#?}", self);
+        self.free_memory(ptr as usize, layout.size());
+        println!("{:#?}", self);
     }
 }
 
@@ -442,5 +498,87 @@ mod test {
         let final_ptr = unsafe { allocator.alloc(final_layout) };
         assert!(!final_ptr.is_null(), "Final large allocation failed");
         unsafe { allocator.dealloc(final_ptr, final_layout) };
+    }
+
+    #[test]
+    fn test_back_pointer_on_merge() {
+        let (allocator, _heap) = test_setup(4096);
+        let layout1 = Layout::from_size_align(128, 8).unwrap();
+        let ptr1 = unsafe { allocator.alloc(layout1) };
+        assert!(!ptr1.is_null());
+        allocator.assert_on_test();
+
+        // Allocate with a large alignment to force a back pointer
+        let layout2 = Layout::from_size_align(256, 512).unwrap();
+        let ptr2 = unsafe { allocator.alloc(layout2) };
+        assert!(!ptr2.is_null());
+        assert_eq!(ptr2 as usize % 512, 0);
+        allocator.assert_on_test();
+
+        let layout3 = Layout::from_size_align(128, 8).unwrap();
+        let ptr3 = unsafe { allocator.alloc(layout3) };
+        assert!(!ptr3.is_null());
+        allocator.assert_on_test();
+
+        // Free in an order that tests coalescing with a back pointer
+        unsafe { allocator.dealloc(ptr1, layout1) };
+        allocator.assert_on_test();
+        unsafe { allocator.dealloc(ptr3, layout3) };
+        allocator.assert_on_test();
+        // This dealloc uses the back pointer and should trigger coalescing
+        unsafe { allocator.dealloc(ptr2, layout2) };
+        allocator.assert_on_test();
+
+        // Check if coalescing happened
+        let large_layout = Layout::from_size_align(1024, 8).unwrap();
+        let large_ptr = unsafe { allocator.alloc(large_layout) };
+        assert!(
+            !large_ptr.is_null(),
+            "Large allocation after coalescing with back pointer failed"
+        );
+        allocator.assert_on_test();
+        unsafe { allocator.dealloc(large_ptr, large_layout) };
+    }
+
+    #[test]
+    fn test_zero_size_allocation() {
+        let (allocator, _heap) = test_setup(1024);
+        let layout = Layout::from_size_align(0, 8).unwrap();
+        let ptr1 = unsafe { allocator.alloc(layout) };
+        // Must be non-null and unique
+        assert!(!ptr1.is_null());
+        let ptr2 = unsafe { allocator.alloc(layout) };
+        assert!(!ptr2.is_null());
+        assert_ne!(ptr1, ptr2);
+        allocator.assert_on_test();
+        unsafe {
+            allocator.dealloc(ptr1, layout);
+            allocator.dealloc(ptr2, layout);
+        }
+        allocator.assert_on_test();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_double_free() {
+        let (allocator, _heap) = test_setup(1024);
+        let layout = Layout::from_size_align(128, 8).unwrap();
+        let ptr = unsafe { allocator.alloc(layout) };
+        assert!(!ptr.is_null());
+        allocator.assert_on_test();
+        unsafe { allocator.dealloc(ptr, layout) };
+        allocator.assert_on_test();
+        // This should panic
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_free_invalid_pointer() {
+        let (allocator, mut heap) = test_setup(1024);
+        let layout = Layout::from_size_align(128, 8).unwrap();
+        // A pointer not from our allocator
+        let invalid_ptr = heap.as_mut_ptr().wrapping_add(40);
+        unsafe { allocator.dealloc(invalid_ptr, layout) };
     }
 }

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 mutex = { path = "../mutex" }
+common = { path = "../common"}
 
 [profile.release]
 panic = 'abort'

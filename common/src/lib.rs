@@ -7,15 +7,15 @@
 
 #![no_std]
 
-pub mod uefi;
 pub mod console;
 pub mod cpu;
 pub mod print;
+pub mod uefi;
 
-use core::option::Option;
 use core::num::NonZeroUsize;
+use core::option::Option;
 
-pub static mut SERIAL_PORT:Option<usize> = None; //:warning: This will changed by other program!!!
+pub static mut SERIAL_PORT: Option<usize> = None; //:warning: This will changed by other program!!!
 pub const PL011_QEMU: usize = 0x900_0000; //for qm
 //const PL011: usize = 0x107D001000;//for raspi 5
 pub const RANGE: usize = 0x1000;
@@ -31,9 +31,6 @@ macro_rules! bitmask {
 }
 
 pub struct SystemInformation {
-    pub spin_table_info: Option<(
-        usize,
-        NonZeroUsize,
-)>,
+    pub spin_table_info: Option<(usize, NonZeroUsize)>,
     pub serial_port: Option<usize>,
 }
